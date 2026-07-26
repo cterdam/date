@@ -179,6 +179,30 @@ def jdn2cn_day(j: int) -> CnDay:
     return _CN_DAYS[j - _month_at(j)[0]]
 
 
+_CN_DAY_IDX = {d: i for i, d in enumerate(_CN_DAYS)}
+
+
+def cn_day_seek(j: int, sign: bool, vs) -> int:
+    """First day >= j whose lunar day-of-month satisfies the atom. The
+    lunar day is j minus its month's start, so each month is decided in
+    O(1) from _month_at instead of being walked; every month has 29 or 30
+    days, so any satisfiable atom lands within a few months (only 三十 can
+    skip the 29-day ones)."""
+    idxs = sorted(_CN_DAY_IDX[v] for v in vs)
+    while True:
+        start, stop, _, _, _ = _month_at(j)
+        n = stop - start
+        if sign:
+            for i in idxs:
+                if j - start <= i < n:
+                    return start + i
+        else:
+            for i in range(j - start, n):
+                if _CN_DAYS[i] not in vs:
+                    return start + i
+        j = stop
+
+
 def year_pillar_index_of(j: int) -> int:
     return (jdn2cn_year(j) - 4) % 60
 

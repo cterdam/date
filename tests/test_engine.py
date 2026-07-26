@@ -121,6 +121,19 @@ class SeekDifferentialTest(unittest.TestCase):
             lambda j: ar.jdn2civil(j)[1:] == (2, 29) and j % 7 == 3,
         )
 
+    def test_cn_day(self):
+        from datex import chinese as ch
+
+        self.check(Date(cn_day="初一"), lambda j: ch.jdn2cn_day(j) == "初一")
+        self.check(Date(cn_day="三十"), lambda j: ch.jdn2cn_day(j) == "三十")
+
+    def test_cn_day_negative(self):
+        from datex import chinese as ch
+
+        self.check(
+            Date() - Date(cn_day="初一"), lambda j: ch.jdn2cn_day(j) != "初一"
+        )
+
     def test_negative_month_positive_day(self):
         self.check(
             Date(day=13) - Date(month=[1, 2, 3, 4, 5, 6]),

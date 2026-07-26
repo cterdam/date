@@ -341,7 +341,15 @@ def _step(preds, j):
             a.span_end(j) if a.seek is None else a.seek(j + 1, sg, vs)
             for a, sg, vs in fails
         )
-    return True, min((a.span_end(j) for a, _, _ in preds), default=_INF)
+    return True, min(
+        (
+            # a passing atom holds up to (exactly) the negated atom's seek;
+            # span_end only lower-bounds that flip
+            a.span_end(j) if a.seek is None else a.seek(j + 1, not sg, vs)
+            for a, sg, vs in preds
+        ),
+        default=_INF,
+    )
 
 
 @functools.lru_cache(maxsize=None)

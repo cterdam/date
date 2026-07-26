@@ -151,6 +151,7 @@ class Axis(enum.Enum):
         from_jdn=ch.jdn2cn_day,
         span_end=ar.daily,
         astro=True,
+        seek=ch.cn_day_seek,
     )
     cn_day_tiangan = _Def(
         kind=Tiangan,

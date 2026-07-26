@@ -35,6 +35,10 @@ class _Def:
     from_jdn: Callable[[int], object]
     span_end: Callable[[int], int]
     astro: bool = False
+    # seek(j, sign, vs): first day >= j satisfying the atom, in closed form.
+    # Set wherever the value is invertible in the day; the engine jumps to
+    # it instead of walking span boundaries.
+    seek: Callable[[int, bool, frozenset], int] | None = None
 
 
 class Axis(enum.Enum):
@@ -58,18 +62,21 @@ class Axis(enum.Enum):
         period=_CYCLE,
         from_jdn=ar.jdn2month,
         span_end=ar.month_span_end,
+        seek=ar.month_seek,
     )
     day = _Def(
         kind=int,
         period=_CYCLE,
         from_jdn=ar.jdn2day,
         span_end=ar.daily,
+        seek=ar.day_seek,
     )
     weekday = _Def(
         kind=Weekday,
         period=7,
         from_jdn=ar.jdn2weekday,
         span_end=ar.daily,
+        seek=ar.weekday_seek,
     )
     week = _Def(
         kind=_WEEK,
@@ -82,6 +89,7 @@ class Axis(enum.Enum):
         period=_CYCLE,
         from_jdn=ar.jdn2doy,
         span_end=ar.daily,
+        seek=ar.doy_seek,
     )
     leap = _Def(
         kind=bool,
@@ -149,12 +157,14 @@ class Axis(enum.Enum):
         period=60,
         from_jdn=ar.jdn2cn_day_tiangan,
         span_end=ar.daily,
+        seek=ar.cn_day_tiangan_seek,
     )
     cn_day_dizhi = _Def(
         kind=Dizhi,
         period=60,
         from_jdn=ar.jdn2cn_day_dizhi,
         span_end=ar.daily,
+        seek=ar.cn_day_dizhi_seek,
     )
 
     def __init__(self, d: _Def) -> None:
@@ -163,6 +173,7 @@ class Axis(enum.Enum):
         self.from_jdn = d.from_jdn
         self.span_end = d.span_end
         self.astro = d.astro
+        self.seek = d.seek
 
 
 # The monotone axes: nondecreasing in the day, so their values enumerate

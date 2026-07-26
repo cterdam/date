@@ -129,15 +129,29 @@ def _sui_of(j: int):
     raise AssertionError(f"no suì covers day {j}")
 
 
-def _month_of(j: int) -> tuple[int, int, bool, int]:
-    """(start_day, month_number, is_leap, lunar_year) of the month holding j.
-    Uncached per day — the per-suì cache above keeps this cheap while day
-    streams stay memory-bounded."""
-    months, _ = _sui_of(j)
-    for start, num, leap, ly in reversed(months):
-        if start <= j:
-            return start, num, leap, ly
-    raise AssertionError(f"day {j} precedes its suì")
+# Last month looked up: (start, end, month_number, is_leap, lunar_year).
+# Day streams are overwhelmingly sequential, so this single-entry memo
+# absorbs almost every repeat while staying memory-bounded (the per-suì
+# cache above keeps the misses cheap).
+_month_memo: tuple[int, int, int, bool, int] | None = None
+
+
+def _month_at(j: int) -> tuple[int, int, int, bool, int]:
+    """(start_day, end_day, month_number, is_leap, lunar_year) of the
+    lunisolar month holding j."""
+    global _month_memo
+    memo = _month_memo
+    if memo is not None and memo[0] <= j < memo[1]:
+        return memo
+    months, end = _sui_of(j)
+    starts = [start for start, _, _, _ in months]
+    i = bisect.bisect_right(starts, j) - 1
+    if i < 0:
+        raise AssertionError(f"day {j} precedes its suì")
+    start, num, leap, ly = months[i]
+    stop = starts[i + 1] if i + 1 < len(months) else end
+    _month_memo = (start, stop, num, leap, ly)
+    return _month_memo
 
 
 @functools.lru_cache(maxsize=None)
@@ -153,16 +167,16 @@ def cny_day(lunar_year: int) -> int:
 
 
 def jdn2cn_year(j: int) -> int:
-    return _month_of(j)[3]
+    return _month_at(j)[4]
 
 
 def jdn2cn_month(j: int) -> CnMonth:
-    _, num, leap, _ = _month_of(j)
+    _, _, num, leap, _ = _month_at(j)
     return _CN_MONTHS[(num - 1) * 2 + leap]
 
 
 def jdn2cn_day(j: int) -> CnDay:
-    return _CN_DAYS[j - _month_of(j)[0]]
+    return _CN_DAYS[j - _month_at(j)[0]]
 
 
 def year_pillar_index_of(j: int) -> int:
@@ -183,14 +197,21 @@ def jdn2cn_year_dizhi(j: int) -> Dizhi:
 
 def _jie_ordinal(j: int) -> int:
     """Number of 節 days <= j, as 12·year + count within that year's list.
-    Year-agnostic: in the far future the terms drift into the previous civil
-    December (first breach: 小寒 of 9233 falls on 9232-12-31), so the year
-    whose list holds the last 節 <= j may be the civil year's neighbour."""
+    Year y+1 can matter only when all 12 of year y's terms are already <= j
+    (in the far future the terms drift into the previous civil December —
+    first breach: 小寒 of 9233 falls on 9232-12-31), so its 12 root solves
+    are paid only in that window, not on every query."""
     y = ar.jdn2civil(j)[0]
-    for yy in (y + 1, y, y - 1):
-        c = bisect.bisect_right(_jie_days(yy), j)
-        if c:
-            return 12 * yy + c
+    c = bisect.bisect_right(_jie_days(y), j)
+    if c == 12:
+        c1 = bisect.bisect_right(_jie_days(y + 1), j)
+        if c1:
+            return 12 * (y + 1) + c1
+    if c:
+        return 12 * y + c
+    c = bisect.bisect_right(_jie_days(y - 1), j)
+    if c:
+        return 12 * (y - 1) + c
     raise AssertionError(f"no 節 precedes day {j}")
 
 
@@ -221,8 +242,7 @@ def cn_year_span_end(j: int) -> int:
 
 def cn_month_span_end(j: int) -> int:
     """First day of the next lunisolar month."""
-    months, end = _sui_of(j)
-    return min((s for s, _, _, _ in months if s > j), default=end)
+    return _month_at(j)[1]
 
 
 def cn_month_pillar_span_end(j: int) -> int:

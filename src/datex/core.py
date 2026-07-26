@@ -10,13 +10,18 @@ raises, while any well-formed value no day carries (day=32, week 53 of a
 
 The engine enumerates by span-jumping: every axis evaluator is a step
 function of the day, so a conjunction's runs are walked boundary-to-boundary
-(cost proportional to runs, never days — while a predicate is false the walk
-jumps to the last failing predicate's boundary). Emptiness of arithmetic
-conjunctions is decided exactly by one lcm-period window per driver span
-(the periodicity theorem); astronomically-constrained conjunctions over an
-unbounded driver answer by the drift-recurrence decree, with the
-lunisolar-month/節氣-branch incompatibility certificate proving the certain
-empties.
+(cost proportional to runs, never days). Wherever a value has a closed form
+in the day — the modular axes (weekday, the day pillars) and the civil
+fields (month, day, doy) — a failing atom's seek computes its next
+satisfying day outright and the walk jumps straight there; only evaluators
+with no inverse (the astronomical ones) fall back to span boundaries.
+Emptiness of arithmetic conjunctions is decided exactly by one lcm-period
+window per driver span (the periodicity theorem); astronomically-constrained
+conjunctions over an unbounded driver answer by the drift-recurrence decree,
+with structural certificates — the lunisolar-month/節氣-branch
+incompatibility, sexagenary stem/branch parity, and the cn_year-pinned year
+pillar — proving the certain empties before the decree may presume
+satisfiability.
 
 project(axes) takes one tuple of Axis members and yields sorted, duplicate-
 free value tuples of the same arity; jdn components are maximally contiguous
@@ -34,12 +39,13 @@ import math
 from . import arithmetic as ar
 from . import chinese as ch
 from .axis import MONOTONE, Axis, is_scalar, normalize, sort_key
-from .values import CnMonth, Dizhi
+from .values import CnMonth, Dizhi, Tiangan
 
 MIN_JDN = 1
 _INF = math.inf
 _MAX_TERMS = 4096
 
+_TIANGAN = tuple(Tiangan)
 _DIZHI = tuple(Dizhi)
 
 
@@ -157,6 +163,7 @@ def _merge_two(t1: tuple, t2: tuple):
 _INT_CODOMAINS = {Axis.day: range(1, 32), Axis.doy: range(1, 367)}
 
 
+@functools.lru_cache(maxsize=None)
 def _codomain(axis):
     if axis in _INT_CODOMAINS:
         return _INT_CODOMAINS[axis]
@@ -165,6 +172,7 @@ def _codomain(axis):
     return tuple(axis.kind)
 
 
+@functools.lru_cache(maxsize=None)
 def _finite_codomain(axis):
     """The axis's full value set, or None when unbounded (jdn, year, week,
     cn_year)."""
@@ -210,19 +218,80 @@ def _compatible(cm: CnMonth, dz: Dizhi) -> bool:
     return _DIZHI.index(dz) in allowed
 
 
+# Each pillar level is one sexagenary index i carrying stem i % 10 and
+# branch i % 12, so a (stem, branch) pair exists iff the indices agree in
+# parity — only 60 of the 120 combinations occur.
+_PILLAR_PAIRS = (
+    (Axis.cn_year_tiangan, Axis.cn_year_dizhi),
+    (Axis.cn_month_tiangan, Axis.cn_month_dizhi),
+    (Axis.cn_day_tiangan, Axis.cn_day_dizhi),
+)
+
+# The civil-shape tables: the longest each month ever runs, and the two
+# cumulative day-count profiles a year can have.
+_MAX_DIM = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+_CUM = (
+    (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365),
+    (0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335, 366),
+)
+
+
+def _month_day_possible(m: int, d: int) -> bool:
+    return d <= _MAX_DIM[m - 1]
+
+
+def _month_doy_possible(m: int, v: int) -> bool:
+    return any(c[m - 1] < v <= c[m] for c in _CUM)
+
+
 def _certified_empty(term) -> bool:
+    """Whether the term is provably empty by structure alone — decided
+    before any scan, and consulted before the drift-recurrence decree can
+    presume an astronomical combination satisfiable."""
     d = {a: vs for a, sg, vs in term if sg}
+    months, days = d.get(Axis.month), d.get(Axis.day)
+    doys, leaps = d.get(Axis.doy), d.get(Axis.leap)
+    if months is not None and days is not None:
+        if not any(_month_day_possible(m, dd) for m in months for dd in days):
+            return True
+    if months is not None and doys is not None:
+        if not any(_month_doy_possible(m, v) for m in months for v in doys):
+            return True
+    if doys is not None and leaps is not None:  # doy 366 needs a leap year
+        if not any(v <= 365 or lp for v in doys for lp in leaps):
+            return True
     m, dz = d.get(Axis.cn_month), d.get(Axis.cn_month_dizhi)
-    return (
+    if (
         m is not None
         and dz is not None
         and not any(_compatible(cm, z) for cm in m for z in dz)
-    )
+    ):
+        return True
+    for tg_axis, dz_axis in _PILLAR_PAIRS:
+        tg, dz = d.get(tg_axis), d.get(dz_axis)
+        if tg is not None and dz is not None:
+            parities = {_TIANGAN.index(t) % 2 for t in tg}
+            if not parities & {_DIZHI.index(z) % 2 for z in dz}:
+                return True
+    years = d.get(Axis.cn_year)
+    if years is not None:  # the year pillar is exactly (cn_year - 4) % 60
+        tg = d.get(Axis.cn_year_tiangan)
+        if tg is not None:
+            idx = {_TIANGAN.index(t) for t in tg}
+            if not any((y - 4) % 10 in idx for y in years):
+                return True
+        dz = d.get(Axis.cn_year_dizhi)
+        if dz is not None:
+            idx = {_DIZHI.index(z) for z in dz}
+            if not any((y - 4) % 12 in idx for y in years):
+                return True
+    return False
 
 
 # -- the span-jumping enumerator -------------------------------------------
 
 
+@functools.lru_cache(maxsize=None)
 def _driver(term):
     """Sorted disjoint (start, stop) spans bounding the term's days — the
     positive monotone atoms turned into day spans (stop may be inf)."""
@@ -245,9 +314,10 @@ def _driver(term):
         elif sg and a is Axis.cn_year:
             spans = _isect_spans(spans, _union_spans(
                 (ch.cny_day(v), ch.cny_day(v + 1)) for v in vs))
-    return spans
+    return tuple(spans)
 
 
+@functools.lru_cache(maxsize=None)
 def _preds(term):
     """The atoms the walk must evaluate: everything but jdn (folded into the
     driver, both signs) and the positive monotone atoms (already spans)."""
@@ -259,25 +329,28 @@ def _preds(term):
 
 
 def _step(preds, j):
-    """(ok, next_boundary): while any predicate is false the verdict cannot
-    flip before the LAST failing predicate's span end, so jump there."""
-    false_ends = []
-    true_ends = []
-    for a, sg, vs in preds:
-        if (a.from_jdn(j) in vs) == sg:
-            true_ends.append(a.span_end(j))
-        else:
-            false_ends.append(a.span_end(j))
-    if false_ends:
-        return False, max(false_ends)
-    return True, min(true_ends, default=_INF)
+    """(ok, next_boundary): a failing atom cannot hold before its seek —
+    the closed-form next satisfying day — or, lacking one, its span end; so
+    the conjunction cannot hold before the LATEST such day, and the walk
+    jumps straight there. Span ends are computed only for the atoms that
+    need them: the failing ones here, all of them on a passing step (where
+    the verdict holds until the first boundary)."""
+    fails = [x for x in preds if (x[0].from_jdn(j) in x[2]) != x[1]]
+    if fails:
+        return False, max(
+            a.span_end(j) if a.seek is None else a.seek(j + 1, sg, vs)
+            for a, sg, vs in fails
+        )
+    return True, min((a.span_end(j) for a, _, _ in preds), default=_INF)
 
 
-def _horizon_and_window(term, preds):
+@functools.lru_cache(maxsize=None)
+def _horizon_and_window(term):
     """For an all-arithmetic term: (horizon, window) such that beyond
     `horizon` every negative monotone atom is constantly true and the
     remaining predicates repeat with period `window` — so any driver span
     scanned for one full window past the horizon with no hit has none."""
+    preds = _preds(term)
     window = math.lcm(*([a.period for a, _, _ in preds if a.period] or [1]))
     horizon = MIN_JDN
     for a, sg, vs in preds:
@@ -297,7 +370,7 @@ def _first_day(term, start: int):
     preds = _preds(term)
     astro = any(a.astro for a, _, _ in preds)
     if not astro:
-        horizon, window = _horizon_and_window(term, preds)
+        horizon, window = _horizon_and_window(term)
     for s, e in _driver(term):
         j = max(s, start)
         stop = e if astro else min(e, max(j, horizon) + window)
@@ -406,16 +479,41 @@ def _atom_date(axis, v) -> Date:
     return d
 
 
+def _positive_values(d: Date, axis):
+    """The union of the terms' positive values on `axis` — the only values
+    the set can attain there — or None when some term leaves the axis
+    positively unconstrained (any codomain value may then survive)."""
+    out = set()
+    for term in d._terms:
+        for a, sg, vs in term:
+            if a is axis and sg:
+                out |= vs
+                break
+        else:
+            return None
+    return out
+
+
 def _monotone_values(d: Date, axis):
-    """The set's distinct values on a monotone axis, ascending."""
+    """The set's distinct values on a monotone axis, ascending. Each term's
+    next member day is remembered between yields — a first day is still the
+    first past any smaller start — so only the terms the cursor overtook are
+    re-probed, not every term at every value."""
     start = MIN_JDN
+    nxt: dict = {}
     while True:
-        firsts = [f for t in d._terms if (f := _first_day(t, start)) is not None]
-        if not firsts:
+        best = None
+        for t in d._terms:
+            f = nxt.get(t, MIN_JDN - 1)
+            if f is not None and f < start:
+                f = _first_day(t, start)
+                nxt[t] = f
+            if f is not None and (best is None or f < best):
+                best = f
+        if best is None:
             return
-        j = min(firsts)
-        yield axis.from_jdn(j)
-        start = axis.span_end(j)
+        yield axis.from_jdn(best)
+        start = axis.span_end(best)
 
 
 def _project(d: Date, axes):
@@ -438,7 +536,7 @@ def _project(d: Date, axes):
         ):
             hs, ws = [], []
             for t in terms:
-                h, w = _horizon_and_window(t, _preds(t))
+                h, w = _horizon_and_window(t)
                 drv = _driver(t)
                 hs.append(max(h, drv[-1][0]))
                 if drv[-1][1] != _INF:
@@ -460,16 +558,24 @@ def _project(d: Date, axes):
                 j = b
             yield (range(cs, r.stop), *cur)
         return
-    values = (
-        _monotone_values(d, a0)
-        if a0 in MONOTONE
-        else (v for v in _codomain(a0) if d & _atom_date(a0, v))
-    )
-    for v in values:
+    if a0 in MONOTONE:
+        for v in _monotone_values(d, a0):
+            if len(axes) == 1:
+                yield (v,)
+            else:
+                sub = d & _atom_date(a0, v)
+                yield from ((v, *rest) for rest in _project(sub, axes[1:]))
+        return
+    allowed = _positive_values(d, a0)
+    for v in _codomain(a0):
+        if allowed is not None and v not in allowed:
+            continue
+        sub = d & _atom_date(a0, v)
+        if not sub:
+            continue
         if len(axes) == 1:
             yield (v,)
         else:
-            sub = d & _atom_date(a0, v)
             yield from ((v, *rest) for rest in _project(sub, axes[1:]))
 
 
@@ -569,7 +675,9 @@ class Date:
     def __eq__(self, other):
         if not isinstance(other, Date):
             return NotImplemented
-        return not self ^ other
+        if self._terms == other._terms:
+            return True
+        return not self - other and not other - self
 
     def __le__(self, other):
         if not isinstance(other, Date):

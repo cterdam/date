@@ -83,19 +83,25 @@ ints, `leap` a bool, `week` an `(iso_year, week)` int pair.
 ## The engine
 
 Enumeration **span-jumps**: a conjunction's runs are walked
-boundary-to-boundary (while any predicate is false, the walk jumps to the
-last failing predicate's span end), so cost is proportional to runs — and to
-the finest constrained axis — never to days at large. Emptiness of
-arithmetic conjunctions is decided exactly by scanning one lcm-period window
-per driver span (everything Gregorian repeats every 146,097 days, weekdays
+boundary-to-boundary, so cost is proportional to runs — and to the finest
+constrained axis — never to days at large. Wherever a value has a closed
+form in the day, a failing predicate **seeks**: the walk jumps straight to
+its next satisfying day (weekday and the day pillars by residue, month/day/
+doy through the civil conversions); only the astronomical evaluators, which
+have no inverse, fall back to span boundaries. Emptiness is decided by
+**structural certificates** wherever a closed form exists — calendar shape
+(Feb 30, day 31 in a 30-day month, doy 366 in a common year, doy/month
+mismatches), sexagenary stem/branch parity at all three pillar levels, the
+cn_year-pinned year pillar, and the lunisolar-month/節氣-branch
+incompatibility — and only otherwise by scanning one lcm-period window per
+driver span (everything Gregorian repeats every 146,097 days, weekdays
 every 7, the day pillar every 60 — a full silent window proves emptiness).
 Astronomically-constrained sets over an unbounded day range answer
 truthiness by the **drift-recurrence principle** (part of the imposed
 standard: the Gregorian year outpaces the decreed tropical year, so the
 solar frame precesses through the whole calendar and every satisfiable
-combination recurs forever), with a lunisolar-month/節氣-branch
-incompatibility certificate proving the certain empties; the decree never
-overrides an arithmetically-empty skeleton. The one open frontier: a union
+combination recurs forever); the decree never overrides a certificate or an
+arithmetically-empty skeleton. The one open frontier: a union
 of purely astronomical sets that happens to cover an unbounded contiguous
 tail has no finite certificate and streams unboundedly on jdn.
 

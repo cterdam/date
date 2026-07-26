@@ -22,6 +22,8 @@ _JDN_UNIX = 2_440_588  # JDN of 1970-01-01
 
 _TIANGAN = tuple(Tiangan)
 _DIZHI = tuple(Dizhi)
+_TIANGAN_IDX = {t: i for i, t in enumerate(_TIANGAN)}
+_DIZHI_IDX = {z: i for i, z in enumerate(_DIZHI)}
 
 
 # -- civil ↔ jdn -----------------------------------------------------------
@@ -141,6 +143,100 @@ def jdn2cn_day_tiangan(j: int) -> Tiangan:
 
 def jdn2cn_day_dizhi(j: int) -> Dizhi:
     return _DIZHI[pillar_index_of(j) % 12]
+
+
+# -- seeks -------------------------------------------------------------------
+#
+# X_seek(j, sign, vs) is the first day >= j whose value satisfies the atom
+# (in vs when sign, out of vs when not). Where a value has a closed form in
+# the day — the periodic axes and the civil fields — the engine jumps
+# straight to the answer instead of stepping spans. _clean guarantees every
+# atom is satisfiable within the codomain (a positive atom is nonempty, a
+# negative one never covers everything), so a seek always lands.
+
+
+def _seek_residue(j: int, good, mod: int) -> int:
+    for off in range(mod):
+        if (j + off) % mod in good:
+            return j + off
+    raise AssertionError("unsatisfiable modular atom escaped _clean")
+
+
+def weekday_seek(j: int, sign: bool, vs) -> int:
+    good = {int(v) - 1 for v in vs}  # weekday(j) = j % 7 + 1
+    if not sign:
+        good = set(range(7)) - good
+    return _seek_residue(j, good, 7)
+
+
+def cn_day_tiangan_seek(j: int, sign: bool, vs) -> int:
+    # stem index is (j + PILLAR_K) % 10, so day residues shift by PILLAR_K
+    good = {(_TIANGAN_IDX[v] - PILLAR_K) % 10 for v in vs}
+    if not sign:
+        good = set(range(10)) - good
+    return _seek_residue(j, good, 10)
+
+
+def cn_day_dizhi_seek(j: int, sign: bool, vs) -> int:
+    good = {(_DIZHI_IDX[v] - PILLAR_K) % 12 for v in vs}
+    if not sign:
+        good = set(range(12)) - good
+    return _seek_residue(j, good, 12)
+
+
+def month_seek(j: int, sign: bool, vs) -> int:
+    y, m, _ = jdn2civil(j)
+    ms = {int(v) for v in vs}
+    if (m in ms) == sign:
+        return j
+    while True:
+        m += 1
+        if m == 13:
+            y, m = y + 1, 1
+        if (m in ms) == sign:
+            return civil2jdn(y, m, 1)
+
+
+def day_seek(j: int, sign: bool, vs) -> int:
+    y, m, d = jdn2civil(j)
+    if sign:
+        vals = sorted(vs)
+        while True:
+            dim = days_in_month(y, m)
+            for v in vals:
+                if d <= v <= dim:
+                    return civil2jdn(y, m, v)
+            y, m, d = (y + 1, 1, 1) if m == 12 else (y, m + 1, 1)
+    while True:
+        dim = days_in_month(y, m)
+        while d <= dim:
+            if d not in vs:
+                return civil2jdn(y, m, d)
+            d += 1
+        y, m, d = (y + 1, 1, 1) if m == 12 else (y, m + 1, 1)
+
+
+def doy_seek(j: int, sign: bool, vs) -> int:
+    y = jdn2civil(j)[0]
+    start = civil2jdn(y, 1, 1)
+    cur = j - start + 1
+    if sign:
+        vals = sorted(vs)
+        while True:
+            n = 365 + is_leap(y)
+            for v in vals:
+                if cur <= v <= n:
+                    return start + v - 1
+            y += 1
+            start, cur = civil2jdn(y, 1, 1), 1
+    while True:
+        n = 365 + is_leap(y)
+        while cur <= n:
+            if cur not in vs:
+                return start + cur - 1
+            cur += 1
+        y += 1
+        start, cur = civil2jdn(y, 1, 1), 1
 
 
 # -- span ends --------------------------------------------------------------

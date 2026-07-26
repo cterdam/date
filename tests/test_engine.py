@@ -42,6 +42,17 @@ class CertificateTest(unittest.TestCase):
     def test_parity_empty_equals_empty(self):
         self.assertEqual(Date(day=32), Date(cn_year_tiangan="甲", cn_year_dizhi="丑"))
 
+    def test_certified_empty_projects_empty_on_monotone_axes(self):
+        # bool() and projection must agree: a certified-empty astro term
+        # over an unbounded driver has no scan cap, so the monotone path
+        # must drop it rather than probe it forever
+        d = Date(cn_year_tiangan="甲", cn_year_dizhi="丑")
+        t0 = time.perf_counter()
+        self.assertEqual(list(d.project((Axis.year,))), [])
+        self.assertEqual(list(d.project((Axis.cn_year,))), [])
+        self.assertEqual(list((d | Date(day=32)).project((Axis.year,))), [])
+        self.assertLess(time.perf_counter() - t0, 2.0)
+
     def test_cn_year_pins_year_pillar(self):
         # 2024 - 4 = 2020: stem index 0 (甲), branch index 4 (辰)
         self.assertTrue(Date(cn_year=2024, cn_year_tiangan="甲"))

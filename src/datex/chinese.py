@@ -150,8 +150,9 @@ def _month_at(j: int) -> tuple[int, int, int, bool, int]:
         raise AssertionError(f"day {j} precedes its suì")
     start, num, leap, ly = months[i]
     stop = starts[i + 1] if i + 1 < len(months) else end
-    _month_memo = (start, stop, num, leap, ly)
-    return _month_memo
+    found = (start, stop, num, leap, ly)
+    _month_memo = found
+    return found
 
 
 @functools.lru_cache(maxsize=None)

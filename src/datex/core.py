@@ -507,11 +507,14 @@ def _monotone_values(d: Date, axis):
     next member day is remembered between yields — a first day is still the
     first past any smaller start — so only the terms the cursor overtook are
     re-probed, not every term at every value."""
+    # dead terms would otherwise be re-probed forever: a certified-empty
+    # astro term over an unbounded driver has no first day and no scan cap
+    terms = tuple(t for t in d._terms if _term_nonempty(t))
     start = MIN_JDN
     nxt: dict = {}
     while True:
         best = None
-        for t in d._terms:
+        for t in terms:
             f = nxt.get(t, MIN_JDN - 1)
             if f is not None and f < start:
                 f = _first_day(t, start)
